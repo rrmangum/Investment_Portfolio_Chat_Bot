@@ -12,6 +12,14 @@ def parse_int(n):
     except ValueError:
         return float("nan")
 
+def parse_float(n):
+    """
+    Securely converts a non-float value to float.
+    """
+    try:
+        return float(n)
+    except ValueError:
+        return float("nan")
 
 def build_validation_result(is_valid, violated_slot, message_content):
     """
@@ -21,6 +29,7 @@ def build_validation_result(is_valid, violated_slot, message_content):
         return {"isValid": is_valid, "violatedSlot": violated_slot}
 
     return {
+
         "isValid": is_valid,
         "violatedSlot": violated_slot,
         "message": {"contentType": "PlainText", "content": message_content},
@@ -112,6 +121,50 @@ In this section, you will create an Amazon Lambda function that will validate th
 """
 
 
+def validate_data(age, investmentAmount, riskLevel, intent_request):
+    """
+    Validates the data provided by the user.
+    """
+
+    # Validate the user is of the correct age
+    if age is not None:
+        age = parse_int(age)
+        if age <= 0:
+            return build_validation_result(
+                False,
+                'age',
+                'You must be atleast one year of age, to start saving for retirement!'
+            )
+            
+        elif age > 64:
+            return build_validation_result(
+                False,
+                'age',
+                'You are already retired!'
+            )
+   
+    # Validate the user is investing the minimum amount
+    if investmentAmount is not None:
+        investmentAmount = parse_int(investmentAmount)
+        if investmentAmount < 5000:
+            return build_validation_result(
+                False,
+                'investment_amount',
+                'Sorry, you must invest $5,000 or more.'
+            )
+
+    # Validate the user has entered a correct risk level        
+    if riskLevel not in ['None', 'Low', 'Medium', 'High']:
+        return build_validation_result(
+            False,
+            'riskLevel',
+            "Sorry you must select one of the following options: 'None', 'Low', 'Medium', or 'High'"
+        )
+            
+    # a True is returned if age and investmentAmount are valid
+    return build_validation_result(True, None, None)
+
+
 ### Intents Handlers ###
 def recommend_portfolio(intent_request):
     """
@@ -122,10 +175,80 @@ def recommend_portfolio(intent_request):
     age = get_slots(intent_request)["age"]
     investment_amount = get_slots(intent_request)["investmentAmount"]
     risk_level = get_slots(intent_request)["riskLevel"]
+    
     source = intent_request["invocationSource"]
 
-    # YOUR CODE GOES HERE!
+    if source == 'DialogCodeHook':
+        # get all the slots
+        slots= get_slots(intent_request)
+        
+        # validate user input
+        validation_result = validate_data(age, investment_amount, risk_level, intent_request)
+        
+        # If the data provided by the user is not valid,
+        # the elicitSlot dialog action is used to re-prompt for the first violation detected.
+        if not validation_result["isValid"]:
+            slots[validation_result["violatedSlot"]] = None  # Cleans invalid slot
 
+            # Returns an elicitSlot dialog to request new data for the invalid slot
+            return elicit_slot(
+                intent_request["sessionAttributes"],
+                intent_request["currentIntent"]["name"],
+                slots,
+                validation_result["violatedSlot"],
+                validation_result["message"],
+            )
+
+        # Fetch current session attributes
+        output_session_attributes = intent_request["sessionAttributes"]
+
+        # Once all slots are valid, a delegate dialog is returned to Lex to choose the next course of action.
+        return delegate(output_session_attributes, get_slots(intent_request))
+        
+    # reccomend portfolio based on user risk level
+    if risk_level == 'None':
+        # Calculate the recommended portfolio multiplier
+        bond_pct = 1.0
+        stock_pct = 0.0
+        portfolio_bonds = parse_float(investment_amount) * bond_pct
+        portfolio_stocks = parse_float(investment_amount) * stock_pct
+        
+    elif risk_level == 'Low':
+        # Calculate the recommended portfolio multiplier
+        bond_pct = 0.6
+        stock_pct = 0.4
+        portfolio_bonds = parse_float(investment_amount) * bond_pct
+        portfolio_stocks = parse_float(investment_amount) * stock_pct
+ 
+    elif risk_level == 'Medium':
+        # Calculate the recommended portfolio multiplier
+        bond_pct = 0.4
+        stock_pct = 0.6
+        portfolio_bonds = parse_float(investment_amount) * bond_pct
+        portfolio_stocks = parse_float(investment_amount) * stock_pct
+        
+    elif risk_level == 'High':
+         # Calculate the recommended portfolio multiplier
+        bond_pct = 0.2
+        stock_pct = 0.8
+        portfolio_bonds = parse_float(investment_amount) * bond_pct
+        portfolio_stocks = parse_float(investment_amount) * stock_pct
+
+    return close(
+        intent_request["sessionAttributes"],
+        "Fulfilled",
+        {
+            "contentType": "PlainText",
+            "content": """Thank you for your information,
+            based on your {} risk level,
+            you should invest ${} in bonds and ${} in stocks.
+            Bonds will make up {}% of your portfolio and 
+            Stocks will make up {}% of your portfolio
+            """.format(
+                risk_level, portfolio_bonds, portfolio_stocks, (bond_pct * 100), (stock_pct * 100)
+            )
+        }
+    )
 
 ### Intents Dispatcher ###
 def dispatch(intent_request):
